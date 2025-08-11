@@ -17,7 +17,7 @@ class GeminiClient:
 
         self.client = genai.Client(api_key=self.api_key)
 
-    def generate_response(self, prompt, model="gemini-2.5-flash", temperature=0.7, max_tokens=1000):
+    def generate_response(self, prompt, model="gemini-2.5-flash", temperature=0.7, max_tokens=300):
         """Generate a response using Gemini"""
         try:
             response = self.client.models.generate_content(
