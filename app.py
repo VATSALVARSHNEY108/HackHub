@@ -22,7 +22,7 @@ if 'teams' not in st.session_state:
 if 'ideas' not in st.session_state:
     st.session_state.ideas = []
 if 'gemini_api_key' not in st.session_state:
-    st.session_state.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+    st.session_state.gemini_api_key = ""
 
 
 def main():
