@@ -1,303 +1,403 @@
-author="Vatsal Varshney"
-import numpy as np
+import streamlit as st
 import pandas as pd
-from sklearn.feature_extraction.text import TfidfVectorizer
-from sklearn.preprocessing import StandardScaler, LabelEncoder
-from sklearn.cluster import KMeans
-from sklearn.metrics.pairwise import cosine_similarity
-import logging
+import numpy as np
+from datetime import datetime
+import plotly.express as px
+import plotly.graph_objects as go
+from utils.team_matcher import TeamMatcher
+from utils.gemini_client import GeminiClient
 
-logger = logging.getLogger(__name__)
+
+def render():
+    st.header("👥 Team Formation")
+    st.markdown("Build optimal teams using ML-powered matching based on skills, experience, and preferences.")
+
+    # Tabs for different sections
+    tab1, tab2, tab3, tab4 = st.tabs(["👤 Register", "📊 Participants", "🤖 Generate Teams", "🏆 View Teams"])
+
+    with tab1:
+        render_registration()
+
+    with tab2:
+        render_participants_view()
+
+    with tab3:
+        render_team_generation()
+
+    with tab4:
+        render_teams_view()
 
 
-class TeamMatcher:
-    """ML-powered team matching for optimal hackathon team formation"""
+def render_registration():
+    st.subheader("👤 Participant Registration")
 
-    def __init__(self, participants, weight_skills=0.3, weight_experience=0.3, weight_interests=0.4):
-        self.participants = participants
-        self.weight_skills = weight_skills
-        self.weight_experience = weight_experience
-        self.weight_interests = weight_interests
+    with st.form("participant_form"):
+        # Basic Information
+        st.markdown("### Basic Information")
+        col1, col2 = st.columns(2)
 
-        # Initialize encoders and scalers
-        self.experience_encoder = LabelEncoder()
-        self.role_encoder = LabelEncoder()
-        self.scaler = StandardScaler()
+        with col1:
+            name = st.text_input("Full Name*", placeholder="Enter your full name")
+            email = st.text_input("Email*", placeholder="your.email@example.com")
+            experience_level = st.selectbox("Experience Level*",
+                                            ["Beginner", "Intermediate", "Advanced", "Expert"])
 
-    def generate_teams(self, num_teams, team_size, balance_priority="Skill Diversity", include_leadership=True):
-        """Generate optimal teams using ML clustering"""
+        with col2:
+            role_preference = st.selectbox("Preferred Role*",
+                                           ["Frontend Developer", "Backend Developer", "Full Stack Developer",
+                                            "Data Scientist", "ML Engineer", "Designer", "Product Manager", "DevOps"])
+            team_size_pref = st.selectbox("Preferred Team Size", [3, 4, 5, 6], index=1)
+            leadership_interest = st.checkbox("Interested in team leadership")
+
+        # Skills & Technologies
+        st.markdown("### Skills & Technologies")
+        col3, col4 = st.columns(2)
+
+        with col3:
+            programming_langs = st.multiselect("Programming Languages",
+                                               ["Python", "JavaScript", "Java", "C++", "C#", "Go", "Rust",
+                                                "Swift", "Kotlin", "PHP", "Ruby", "TypeScript"])
+            frameworks = st.multiselect("Frameworks & Libraries",
+                                        ["React", "Angular", "Vue.js", "Node.js", "Django", "Flask",
+                                         "Spring", "TensorFlow", "PyTorch", "Scikit-learn", "Next.js"])
+
+        with col4:
+            databases = st.multiselect("Databases",
+                                       ["MySQL", "PostgreSQL", "MongoDB", "Redis", "SQLite",
+                                        "Firebase", "DynamoDB", "Elasticsearch"])
+            tools = st.multiselect("Tools & Platforms",
+                                   ["Git", "Docker", "AWS", "Azure", "GCP", "Figma",
+                                    "Adobe Creative Suite", "Jupyter", "Kubernetes"])
+
+        # Interests & Preferences
+        st.markdown("### Project Interests")
+        interests = st.multiselect("Areas of Interest",
+                                   ["Web Development", "Mobile Apps", "AI/ML", "Blockchain", "IoT",
+                                    "Gaming", "Fintech", "Healthcare", "Education", "Sustainability",
+                                    "Social Impact", "AR/VR", "Cybersecurity"])
+
+        bio = st.text_area("Bio/Additional Information",
+                           placeholder="Tell us about yourself, your goals, or anything else relevant...")
+
+        # Collaboration Preferences
+        st.markdown("### Collaboration Preferences")
+        col5, col6 = st.columns(2)
+
+        with col5:
+            work_style = st.selectbox("Work Style", ["Individual focused", "Collaborative", "Mixed"])
+            timezone = st.selectbox("Timezone", ["PST", "EST", "GMT", "CET", "IST", "JST", "Other"])
+
+        with col6:
+            availability = st.selectbox("Availability", ["Full-time", "Part-time", "Weekends only"])
+            communication_pref = st.selectbox("Communication Preference",
+                                              ["Slack/Discord", "Email", "Video calls", "In-person"])
+
+        submitted = st.form_submit_button("🚀 Register Participant", type="primary")
+
+        if submitted:
+            if name and email and experience_level and role_preference:
+                participant = {
+                    'name': name,
+                    'email': email,
+                    'experience_level': experience_level,
+                    'role_preference': role_preference,
+                    'team_size_pref': team_size_pref,
+                    'leadership_interest': leadership_interest,
+                    'programming_langs': programming_langs,
+                    'frameworks': frameworks,
+                    'databases': databases,
+                    'tools': tools,
+                    'interests': interests,
+                    'bio': bio,
+                    'work_style': work_style,
+                    'timezone': timezone,
+                    'availability': availability,
+                    'communication_pref': communication_pref,
+                    'registered_at': datetime.now().isoformat()
+                }
+
+                # Check for existing participant
+                existing = [p for p in st.session_state.participants if p['email'] == email]
+                if existing:
+                    st.error("❌ Participant with this email already registered!")
+                else:
+                    st.session_state.participants.append(participant)
+                    st.success(f"✅ {name} registered successfully!")
+                    st.balloons()
+            else:
+                st.error("❌ Please fill in all required fields marked with *")
+
+
+def render_participants_view():
+    st.subheader("📊 Registered Participants")
+
+    if not st.session_state.participants:
+        st.info("No participants registered yet. Go to the 'Register' tab to add participants!")
+        return
+
+    df = pd.DataFrame(st.session_state.participants)
+
+    # Summary metrics
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        st.metric("Total Participants", len(df))
+    with col2:
+        beginners = len(df[df['experience_level'] == 'Beginner'])
+        st.metric("Beginners", beginners)
+    with col3:
+        experts = len(df[df['experience_level'].isin(['Advanced', 'Expert'])])
+        st.metric("Advanced/Expert", experts)
+    with col4:
+        leaders = len(df[df['leadership_interest'] == True])
+        st.metric("Potential Leaders", leaders)
+
+    # Visualizations
+    col1, col2 = st.columns(2)
+
+    with col1:
+        # Experience distribution
+        exp_counts = df['experience_level'].value_counts()
+        fig_exp = px.pie(values=exp_counts.values, names=exp_counts.index,
+                         title="Experience Level Distribution",
+                         color_discrete_sequence=px.colors.qualitative.Set3)
+        st.plotly_chart(fig_exp, use_container_width=True)
+
+    with col2:
+        # Role preferences
+        role_counts = df['role_preference'].value_counts()
+        fig_role = px.bar(x=role_counts.values, y=role_counts.index,
+                          orientation='h', title="Role Preferences",
+                          color_discrete_sequence=px.colors.qualitative.Pastel)
+        st.plotly_chart(fig_role, use_container_width=True)
+
+    # Search and filter
+    st.markdown("---")
+    search_term = st.text_input("🔍 Search participants",
+                                placeholder="Search by name, skills, interests...")
+
+    # Filter participants
+    filtered_participants = df
+    if search_term:
+        mask = (
+                df['name'].str.contains(search_term, case=False, na=False) |
+                df['role_preference'].str.contains(search_term, case=False, na=False) |
+                df['bio'].str.contains(search_term, case=False, na=False) |
+                df['programming_langs'].astype(str).str.contains(search_term, case=False, na=False) |
+                df['interests'].astype(str).str.contains(search_term, case=False, na=False)
+        )
+        filtered_participants = df[mask]
+
+    # Display participants
+    st.subheader(f"Participants ({len(filtered_participants)})")
+
+    for i, (_, row) in enumerate(filtered_participants.iterrows()):  # FIXED: Changed from to_dict() to iterrows()
+        participant = row.to_dict()
+        with st.expander(f"{participant['name']} - {participant['role_preference']}"):
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.write(f"**Email:** {participant['email']}")
+                st.write(f"**Experience:** {participant['experience_level']}")
+                st.write(f"**Leadership Interest:** {'Yes' if participant['leadership_interest'] else 'No'}")
+                st.write(f"**Team Size Preference:** {participant['team_size_pref']}")
+                st.write(f"**Timezone:** {participant['timezone']}")
+
+            with col2:
+                prog_langs = participant.get('programming_langs', [])
+                frameworks = participant.get('frameworks', [])
+                interests = participant.get('interests', [])
+
+                st.write(f"**Programming Languages:** {', '.join(prog_langs) if prog_langs else 'None'}")
+                st.write(f"**Frameworks:** {', '.join(frameworks) if frameworks else 'None'}")
+                st.write(f"**Interests:** {', '.join(interests) if interests else 'None'}")
+                st.write(f"**Availability:** {participant['availability']}")
+
+            if participant.get('bio'):
+                st.write(f"**Bio:** {participant['bio']}")
+
+
+def render_team_generation():
+    st.subheader("🤖 Generate Optimal Teams")
+
+    if len(st.session_state.participants) < 6:
+        st.warning("⚠️ You need at least 6 participants to generate meaningful teams.")
+        st.info(f"Current participants: {len(st.session_state.participants)}")
+        return
+
+    # Team generation parameters
+    col1, col2 = st.columns(2)
+
+    with col1:
+        team_size = st.selectbox("Target Team Size", [3, 4, 5, 6], index=1)
+        max_teams = len(st.session_state.participants) // team_size
+        num_teams = st.number_input("Number of Teams", min_value=1, max_value=max_teams,
+                                    value=min(max_teams, len(st.session_state.participants) // team_size))
+
+    with col2:
+        balance_priority = st.selectbox("Balancing Priority",
+                                        ["Skill Diversity", "Experience Balance", "Role Diversity",
+                                         "Interest Alignment"])
+        include_leadership = st.checkbox("Ensure each team has a potential leader", value=True)
+
+    # Advanced options
+    with st.expander("🔧 Advanced Options"):
+        weight_skills = st.slider("Skills Weight", 0.0, 1.0, 0.3, help="How much to prioritize skill diversity")
+        weight_experience = st.slider("Experience Weight", 0.0, 1.0, 0.3, help="How much to balance experience levels")
+        weight_interests = st.slider("Interests Weight", 0.0, 1.0, 0.4, help="How much to align interests")
+
+    if st.button("🚀 Generate Teams", type="primary"):
+        generate_optimal_teams(num_teams, team_size, balance_priority, include_leadership,
+                               weight_skills, weight_experience, weight_interests)
+
+
+def render_teams_view():
+    st.subheader("🏆 Generated Teams")
+
+    if not st.session_state.teams:
+        st.info("No teams generated yet. Go to the 'Generate Teams' tab to create teams!")
+        return
+
+    # Teams overview
+    col1, col2, col3 = st.columns(3)
+    with col1:
+        st.metric("Total Teams", len(st.session_state.teams))
+    with col2:
+        total_members = sum(len(team['members']) for team in st.session_state.teams)
+        st.metric("Total Members", total_members)
+    with col3:
+        avg_team_size = total_members / len(st.session_state.teams) if st.session_state.teams else 0
+        st.metric("Avg Team Size", f"{avg_team_size:.1f}")
+
+    # Display each team
+    for i, team in enumerate(st.session_state.teams):
+        with st.expander(f"🏆 Team {i + 1} ({len(team['members'])} members)", expanded=True):
+
+            # Team composition chart
+            if team['members']:
+                roles = [member['role_preference'] for member in team['members']]
+                role_counts = pd.Series(roles).value_counts()
+
+                col1, col2 = st.columns([2, 1])
+
+                with col1:
+                    fig = px.bar(x=role_counts.index, y=role_counts.values,
+                                 title=f"Team {i + 1} Role Distribution")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                with col2:
+                    st.markdown("### Team Stats")
+                    exp_levels = [member['experience_level'] for member in team['members']]
+                    st.write(f"**Avg Experience:** {get_avg_experience(exp_levels)}")
+                    st.write(
+                        f"**Has Leader:** {'Yes' if any(m['leadership_interest'] for m in team['members']) else 'No'}")
+
+                    # Skills overlap
+                    all_skills = []
+                    for member in team['members']:
+                        all_skills.extend(member.get('programming_langs', []))
+                        all_skills.extend(member.get('frameworks', []))
+                    common_skills = pd.Series(all_skills).value_counts().head(3)
+                    st.write(f"**Top Skills:** {', '.join(common_skills.index)}")
+
+            # Team members
+            st.markdown("### Team Members")
+            for j, member in enumerate(team['members']):
+                st.markdown(f"""
+                **{member['name']}** - *{member['role_preference']}*
+                - Experience: {member['experience_level']}
+                - Skills: {', '.join(member.get('programming_langs', [])[:3])}
+                - Leadership: {'Yes' if member['leadership_interest'] else 'No'}
+                """)
+
+            # AI insights if available
+            if st.session_state.gemini_api_key and st.button(f"🤖 Get AI Insights for Team {i + 1}"):
+                generate_team_ai_insights(team, i + 1)
+
+
+def generate_optimal_teams(num_teams, team_size, balance_priority, include_leadership,
+                           weight_skills, weight_experience, weight_interests):
+    """Generate optimal teams using simplified matching"""
+
+    with st.spinner("🧠 Analyzing participants and generating optimal teams..."):
         try:
-            # Prepare feature vectors
-            feature_matrix = self.create_feature_matrix()
+            team_matcher = TeamMatcher(
+                participants=st.session_state.participants,
+                weight_skills=weight_skills,
+                weight_experience=weight_experience,
+                weight_interests=weight_interests
+            )
 
-            # Apply clustering
-            teams = self.cluster_participants(feature_matrix, num_teams, team_size)
+            teams = team_matcher.generate_teams(
+                num_teams=num_teams,
+                team_size=team_size,
+                balance_priority=balance_priority,
+                include_leadership=include_leadership
+            )
 
-            # Balance teams based on priority
-            teams = self.balance_teams(teams, balance_priority, include_leadership)
-
-            # Format teams for output
-            formatted_teams = self.format_teams(teams)
-
-            logger.info(f"Generated {len(formatted_teams)} teams successfully")
-            return formatted_teams
+            st.session_state.teams = teams
+            st.success("✅ Teams generated successfully!")
+            st.balloons()
 
         except Exception as e:
-            logger.error(f"Error generating teams: {e}")
-            raise e
+            st.error(f"❌ Error generating teams: {str(e)}")
 
-    def create_feature_matrix(self):
-        """Create feature matrix for each participant"""
-        features = []
 
-        for participant in self.participants:
-            feature_vector = []
+def generate_team_ai_insights(team, team_number):
+    """Generate AI insights for a specific team"""
+    if not st.session_state.gemini_api_key:
+        st.warning("Please configure your Gemini API key to get AI insights.")
+        return
 
-            # Experience level (numerical)
-            exp_mapping = {'Beginner': 1, 'Intermediate': 2, 'Advanced': 3, 'Expert': 4}
-            experience_score = exp_mapping.get(participant.get('experience_level', 'Beginner'), 1)
-            feature_vector.append(experience_score)
+    try:
+        gemini_client = GeminiClient(st.session_state.gemini_api_key)
 
-            # Leadership interest (binary)
-            feature_vector.append(1 if participant.get('leadership_interest', False) else 0)
+        # Prepare team data for AI analysis
+        team_summary = f"""
+        Team {team_number} composition:
+        - Size: {len(team['members'])} members
+        - Roles: {', '.join([m['role_preference'] for m in team['members']])}
+        - Experience: {', '.join([m['experience_level'] for m in team['members']])}
+        - Skills: {', '.join([skill for m in team['members'] for skill in m.get('programming_langs', [])])}
+        """
 
-            # Team size preference
-            feature_vector.append(participant.get('team_size_pref', 4))
+        # Short prompt for team insights
+        insights_prompt = f"""Analyze team: {team_summary}
 
-            # Role preference (one-hot encoded)
-            roles = ["Frontend Developer", "Backend Developer", "Full Stack Developer",
-                     "Data Scientist", "ML Engineer", "Designer", "Product Manager", "DevOps"]
-            role = participant.get('role_preference', 'Full Stack Developer')
-            role_vector = [1 if role == r else 0 for r in roles]
-            feature_vector.extend(role_vector)
+Give brief strengths, challenges, and project recommendations. 3-4 sentences total."""
 
-            # Skills features (TF-IDF style)
-            all_skills = (
-                    participant.get('programming_langs', []) +
-                    participant.get('frameworks', []) +
-                    participant.get('databases', []) +
-                    participant.get('tools', [])
-            )
-            skills_text = ' '.join(all_skills).lower()
+        with st.spinner(f"Analyzing Team {team_number}..."):
+            insights = gemini_client.generate_response(insights_prompt, max_tokens=150)
 
-            # Interests features
-            interests_text = ' '.join(participant.get('interests', [])).lower()
+        st.markdown(f"### 🤖 AI Insights for Team {team_number}")
+        st.markdown(insights)
 
-            # Store text features separately for TF-IDF processing
-            participant['skills_text'] = skills_text
-            participant['interests_text'] = interests_text
+    except Exception as e:
+        st.error(f"Error generating insights: {str(e)}")
 
-            features.append(feature_vector)
 
-        # Convert to numpy array
-        feature_matrix = np.array(features)
+def get_avg_experience(experience_levels):
+    """Calculate average experience level"""
+    exp_mapping = {'Beginner': 1, 'Intermediate': 2, 'Advanced': 3, 'Expert': 4}
+    if not experience_levels:
+        return "N/A"
 
-        # Add TF-IDF features for skills and interests
-        skills_features = self.create_tfidf_features([p['skills_text'] for p in self.participants])
-        interests_features = self.create_tfidf_features([p['interests_text'] for p in self.participants])
+    avg = sum(exp_mapping.get(level, 1) for level in experience_levels) / len(experience_levels)
+    return f"{avg:.1f}/4"
 
-        # Combine all features
-        combined_features = np.hstack([
-            feature_matrix * self.weight_experience,
-            skills_features * self.weight_skills,
-            interests_features * self.weight_interests
-        ])
 
-        # Normalize features
-        normalized_features = self.scaler.fit_transform(combined_features)
+# Helper functions for text processing
+def create_skills_text(participant):
+    """Create searchable skills text"""
+    skills = []
+    skills.extend(participant.get('programming_langs', []))
+    skills.extend(participant.get('frameworks', []))
+    skills.extend(participant.get('databases', []))
+    skills.extend(participant.get('tools', []))
+    return ' '.join(skills)
 
-        return normalized_features
 
-    def create_tfidf_features(self, text_data):
-        """Create TF-IDF features from text data"""
-        vectorizer = TfidfVectorizer(max_features=50, stop_words='english')
-
-        # Handle empty text data
-        text_data = [text if text.strip() else 'none' for text in text_data]
-
-        try:
-            tfidf_matrix = vectorizer.fit_transform(text_data)
-            if hasattr(tfidf_matrix, 'toarray'):
-                return tfidf_matrix.toarray()
-            else:
-                return tfidf_matrix
-        except ValueError:
-            # If all documents are identical or empty, return zero matrix
-            return np.zeros((len(text_data), 1))
-
-    def cluster_participants(self, feature_matrix, num_teams, team_size):
-        """Cluster participants into teams using K-means"""
-        # Ensure we don't have more teams than participants
-        max_possible_teams = len(self.participants) // 2  # Minimum 2 people per team
-        num_teams = min(num_teams, max_possible_teams)
-
-        if num_teams <= 0:
-            raise ValueError("Not enough participants to form teams")
-
-        # Apply K-means clustering
-        kmeans = KMeans(n_clusters=num_teams, random_state=42, n_init='auto')
-        cluster_labels = kmeans.fit_predict(feature_matrix)
-
-        # Group participants by cluster
-        teams = []
-        for cluster_id in range(num_teams):
-            team_members = [
-                self.participants[i] for i, label in enumerate(cluster_labels)
-                if label == cluster_id
-            ]
-            teams.append(team_members)
-
-        return teams
-
-    def balance_teams(self, teams, balance_priority, include_leadership):
-        """Balance teams based on specified priority"""
-
-        if balance_priority == "Experience Balance":
-            teams = self.balance_experience_levels(teams)
-        elif balance_priority == "Role Diversity":
-            teams = self.balance_roles(teams)
-        elif balance_priority == "Skill Diversity":
-            teams = self.balance_skills(teams)
-        elif balance_priority == "Interest Alignment":
-            teams = self.align_interests(teams)
-
-        if include_leadership:
-            teams = self.ensure_leadership(teams)
-
-        return teams
-
-    def balance_experience_levels(self, teams):
-        """Balance experience levels across teams"""
-        # Calculate experience score for each team
-        exp_mapping = {'Beginner': 1, 'Intermediate': 2, 'Advanced': 3, 'Expert': 4}
-
-        for team in teams:
-            team_exp_scores = [
-                exp_mapping.get(member.get('experience_level', 'Beginner'), 1)
-                for member in team
-            ]
-            team.append({'avg_experience': np.mean(team_exp_scores)})
-
-        # Try to balance by moving members between teams if possible
-        # This is a simplified balancing approach
-        return teams
-
-    def balance_roles(self, teams):
-        """Ensure role diversity within teams"""
-        for team in teams:
-            roles = [member.get('role_preference', '') for member in team]
-            unique_roles = len(set(roles))
-            # Store diversity score for potential rebalancing
-            team.append({'role_diversity': unique_roles / len(team) if team else 0})
-
-        return teams
-
-    def balance_skills(self, teams):
-        """Balance skills across teams"""
-        for team in teams:
-            all_skills = set()
-            for member in team:
-                all_skills.update(member.get('programming_langs', []))
-                all_skills.update(member.get('frameworks', []))
-                all_skills.update(member.get('tools', []))
-
-            team.append({'total_skills': len(all_skills)})
-
-        return teams
-
-    def align_interests(self, teams):
-        """Align team members by interests"""
-        for team in teams:
-            all_interests = []
-            for member in team:
-                all_interests.extend(member.get('interests', []))
-
-            if all_interests:
-                # Calculate most common interests
-                interest_counts = pd.Series(all_interests).value_counts()
-                top_interests = interest_counts.head(3).index.tolist()
-                team.append({'common_interests': top_interests})
-            else:
-                team.append({'common_interests': []})
-
-        return teams
-
-    def ensure_leadership(self, teams):
-        """Ensure each team has at least one potential leader"""
-        teams_needing_leaders = []
-        available_leaders = []
-
-        # Identify teams without leaders and collect available leaders
-        for i, team in enumerate(teams):
-            has_leader = any(member.get('leadership_interest', False) for member in team if isinstance(member, dict))
-            if not has_leader:
-                teams_needing_leaders.append(i)
-
-        # Find participants with leadership interest not yet in teams with leaders
-        for i, team in enumerate(teams):
-            if i not in teams_needing_leaders:
-                leaders_in_team = [
-                    member for member in team
-                    if isinstance(member, dict) and member.get('leadership_interest', False)
-                ]
-                if len(leaders_in_team) > 1:
-                    available_leaders.extend(leaders_in_team[1:])  # Keep one leader per team
-
-        # Distribute leaders to teams that need them
-        for team_idx in teams_needing_leaders[:len(available_leaders)]:
-            leader = available_leaders.pop()
-            teams[team_idx].append(leader)
-
-        return teams
-
-    def format_teams(self, teams):
-        """Format teams for output"""
-        formatted_teams = []
-
-        for i, team_members in enumerate(teams):
-            # Filter out metadata objects
-            members = [member for member in team_members if isinstance(member, dict) and 'name' in member]
-
-            if members:  # Only include teams with actual members
-                team_data = {
-                    'id': i + 1,
-                    'members': members,
-                    'size': len(members),
-                    'avg_experience': self.calculate_team_experience(members),
-                    'role_diversity': len(set(m.get('role_preference', '') for m in members)),
-                    'has_leader': any(m.get('leadership_interest', False) for m in members),
-                    'common_skills': self.get_common_skills(members),
-                    'common_interests': self.get_common_interests(members)
-                }
-                formatted_teams.append(team_data)
-
-        return formatted_teams
-
-    def calculate_team_experience(self, members):
-        """Calculate average team experience level"""
-        exp_mapping = {'Beginner': 1, 'Intermediate': 2, 'Advanced': 3, 'Expert': 4}
-        experiences = [exp_mapping.get(m.get('experience_level', 'Beginner'), 1) for m in members]
-        return np.mean(experiences)
-
-    def get_common_skills(self, members):
-        """Get most common skills in team"""
-        all_skills = []
-        for member in members:
-            all_skills.extend(member.get('programming_langs', []))
-            all_skills.extend(member.get('frameworks', []))
-
-        if all_skills:
-            skill_counts = pd.Series(all_skills).value_counts()
-            return skill_counts.head(5).index.tolist()
-        return []
-
-    def get_common_interests(self, members):
-        """Get most common interests in team"""
-        all_interests = []
-        for member in members:
-            all_interests.extend(member.get('interests', []))
-
-        if all_interests:
-            interest_counts = pd.Series(all_interests).value_counts()
-            return interest_counts.head(3).index.tolist()
-        return []
+def create_interests_text(participant):
+    """Create searchable interests text"""
+    interests = participant.get('interests', [])
+    bio = participant.get('bio', '')
+    return ' '.join(interests) + ' ' + bio
